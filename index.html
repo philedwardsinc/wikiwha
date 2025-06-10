@@ -13,7 +13,7 @@
     @keyframes fadeInDown{0%{opacity:0;transform:translateY(-24px);}100%{opacity:1;transform:translateY(0);}}
     @keyframes fadeInUp{0%{opacity:0;transform:translateY(20px);}100%{opacity:1;transform:translateY(0);}}
     #controls{display:flex;flex-direction:column;align-items:center;gap:2.5rem;width:100%;max-width:800px;}
-    #categoryButtons{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));grid-auto-rows:auto;gap:2rem;width:100%;}
+    #categoryButtons{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:2rem;width:100%;}
     .btn{padding:.7rem 1.4rem;font-size:1rem;font-weight:600;border:none;border-radius:12px;cursor:pointer;background:var(--bg-btn);color:var(--fg);transition:transform .2s,box-shadow .3s,background .3s;box-shadow:0 2px 4px rgba(0,0,0,.06);opacity:0;animation:fadeInUp .5s ease-out forwards;}
     .btn:hover{transform:translateY(-4px);box-shadow:0 6px 12px rgba(0,0,0,.10);} .btn:active{transform:scale(.95);} .btn.active,.btn.primary{background:var(--fg);color:#fff;}
     #goBtn{background:var(--fg);color:#fff;max-width:200px;}
@@ -33,62 +33,68 @@
 
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script>
-    /* ==== CONFIG ==== */
+    /* ===== AUTO‑DETECT HEADERS SO MISC CSVs DON'T BREAK ===== */
     const CSV_PATH='wiki.csv';
-    const FIELDS={title:'Title',url:'URL',cat:'Category',done:'Completed?'};
-    const SAMPLE=`Title,URL,Category,Completed?\nExploding Whale,https://en.wikipedia.org/wiki/Exploding_whale,Animals,\nDancing Plague,https://en.wikipedia.org/wiki/Dancing_Plague_of_1518,History,`;
+    const FALLBACK_SAMPLE=`Title,URL,Category,Completed?\nExploding Whale,https://en.wikipedia.org/wiki/Exploding_whale,Animals,\nDancing Plague,https://en.wikipedia.org/wiki/Dancing_Plague_of_1518,History,`;
 
-    /* ==== STATE ==== */
-    let rows=[], cats=new Set(), uncovered={Any:[]};
-    let currentCat='Any';
-
-    /* ==== DOM ==== */
+    let rows=[], uncovered={}, currentCat='Any';
     const catWrap=document.getElementById('categoryButtons');
-    const goBtn=document.getElementById('goBtn');
     const resWrap=document.getElementById('result');
 
-    /* ==== FUNCTIONS ==== */
-    function normalize(str){return (str||'').trim();}
+    const norm=s=>String(s||'').trim();
 
-    function buildIndex(){
-      uncovered={Any:[]}; cats=new Set();
+    function detectFields(meta){
+      const heads=meta.fields.map(h=>h.trim());
+      const title=heads.find(h=>/title/i.test(h))||heads[0];
+      const url=heads.find(h=>/(url|link)/i.test(h));
+      const cat=heads.find(h=>/categor/i.test(h));
+      const done=heads.find(h=>/(done|cover|complete)/i.test(h));
+      return {title,url,cat,done};
+    }
+
+    function buildIndex(F){
+      uncovered={Any:[]};
+      const setCats=new Set();
       rows.forEach(r=>{
-        const cat=normalize(r[FIELDS.cat])||'Uncategorised';
-        cats.add(cat);
+        const cat=norm(r[F.cat])||'Uncategorised';
+        setCats.add(cat);
         if(!uncovered[cat]) uncovered[cat]=[];
-        const covered=!!normalize(r[FIELDS.done]);
+        const covered=F.done?!!norm(r[F.done]):false;
         if(!covered){uncovered[cat].push(r);uncovered.Any.push(r);} });
+      return Array.from(setCats).sort();
     }
 
-    function buttonFor(cat,idx){
-      const b=document.createElement('button');
-      b.className='btn cat-btn';
-      b.textContent=cat;
-      b.style.animationDelay=`${0.1+idx*0.05}s`;
-      b.onclick=()=>{currentCat=cat;document.querySelectorAll('.cat-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');};
-      return b;
-    }
-
-    function renderCats(){
+    function renderCats(catList){
       catWrap.innerHTML='';
-      Array.from(cats).sort().forEach((c,i)=>{catWrap.appendChild(buttonFor(c,i));});
+      catList.forEach((c,i)=>{
+        const b=document.createElement('button');
+        b.className='btn cat-btn';
+        b.style.animationDelay=`${0.1+i*0.04}s`;
+        b.textContent=c;
+        b.onclick=()=>{currentCat=c;document.querySelectorAll('.cat-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');};
+        catWrap.appendChild(b);
+      });
     }
 
-    function pick(cat){const pool=uncovered[cat]??[];return pool.length?pool[Math.floor(Math.random()*pool.length)]:null;}
+    function pick(cat){const pool=uncovered[cat]||[];return pool[Math.floor(Math.random()*pool.length)];}
 
-    function showArticle(row){
+    function showArticle(r,F){
       resWrap.innerHTML='';
-      if(!row){resWrap.textContent='No articles left in this category.';return;}
-      const a=document.createElement('a');a.href=row[FIELDS.url];a.target='_blank';a.rel='noopener';a.textContent=row[FIELDS.title];resWrap.appendChild(a);
+      if(!r){resWrap.textContent='No articles left.';return;}
+      const a=document.createElement('a');a.href=r[F.url];a.textContent=r[F.title];a.target='_blank';a.rel='noopener';resWrap.appendChild(a);
     }
 
-    /* ==== LOAD ==== */
-    function loadData(data){rows=data.map((r,i)=>({...r,__idx:i}));buildIndex();renderCats();}
-    function parseLocal(){Papa.parse(SAMPLE,{header:true,skipEmptyLines:true,complete:r=>loadData(r.data)});}
-    Papa.parse(CSV_PATH,{header:true,download:true,skipEmptyLines:true,complete:r=>r.data.length?loadData(r.data):parseLocal(),error:parseLocal});
+    function load(data,meta){
+      const F=detectFields(meta);
+      rows=data; // keep raw
+      const catList=buildIndex(F);
+      renderCats(catList);
+      document.getElementById('goBtn').onclick=()=>{showArticle(pick(currentCat),F);} ;
+    }
 
-    /* ==== EVENTS ==== */
-    goBtn.onclick=()=>{showArticle(pick(currentCat));};
+    function parseLocal(){Papa.parse(FALLBACK_SAMPLE,{header:true,skipEmptyLines:true,complete:r=>load(r.data,r.meta)});}
+
+    Papa.parse(CSV_PATH,{header:true,download:true,skipEmptyLines:true,complete:r=>r.data.length?load(r.data,r.meta):parseLocal(),error:parseLocal});
   </script>
 </body>
 </html>
